@@ -34,6 +34,9 @@ fn fetch_public_ip() -> Result<String, String> {
 #[serde(default)]
 pub struct BootCon {
     target: String,
+    nmap_default_scripts: bool,
+    nmap_service_version: bool,
+    nmap_verbose: bool,
 
     #[serde(skip)]
     host: String,
@@ -49,6 +52,9 @@ impl Default for BootCon {
             host: "example.com".to_string(),
             target: "127.0.0.1".to_string(),
             weather: "Kansas+City".to_string(),
+            nmap_default_scripts: true,
+            nmap_service_version: true,
+            nmap_verbose: true,
             public_ip: fetch_public_ip(),
         }
     }
@@ -130,15 +136,33 @@ impl eframe::App for BootCon {
                     ui.text_edit_singleline(&mut self.target);
                 });
 
+                ui.checkbox(&mut self.nmap_default_scripts, "-sC (default scripts)");
+                ui.checkbox(&mut self.nmap_service_version, "-sV (service/version detection)");
+                ui.checkbox(&mut self.nmap_verbose, "-v (verbose)");
+
                 if ui.button("Send it!").clicked() {
+                    let mut flags: Vec<&str> = Vec::new();
+                    if self.nmap_default_scripts {
+                        flags.push("-sC");
+                    }
+                    if self.nmap_service_version {
+                        flags.push("-sV");
+                    }
+                    if self.nmap_verbose {
+                        flags.push("-v");
+                    }
+
                     if cfg!(target_os = "windows") {
                         let mut cmd = Command::new("nmap");
-                        cmd.args(["-sC", "-sV", "-v", &self.target, "-oA", &self.target]);
-                        spawn_or_warn(cmd, "NMAP (Windows, hardcoded)");
+                        cmd.args(&flags)
+                            .args([&self.target, "-oA", &self.target]);
+                        spawn_or_warn(cmd, "NMAP (Windows)");
                     } else {
                         let mut cmd = Command::new("sudo");
-                        cmd.args(["nmap", "-sC", "-sV", "-v", &self.target, "-oA", &self.target]);
-                        spawn_or_warn(cmd, "NMAP (hardcoded)");
+                        cmd.arg("nmap")
+                            .args(&flags)
+                            .args([&self.target, "-oA", &self.target]);
+                        spawn_or_warn(cmd, "NMAP");
                     }
                 }
             });
@@ -342,7 +366,6 @@ impl eframe::App for BootCon {
             });
             ui.separator();
             ui.collapsing("Disclaimer:", |ui| {
-                ui.label("\t- Nmap is currently hardcoded to run with \"-sC\", \"-sV\", and \"-v\" until the checkboxes are wired up to control the flags");
                 ui.label("\t- On Windows, `NMAP`, `DIG`, and `WHOIS` need to be installed and on PATH. If they are missing, the button logs a warning instead of running the tool");
                 ui.label("\t\t- You can use Chocolatey on Windows to install DIG and WHOIS");
                 ui.label("\t\t- DIG -- `choco install bind-toolsonly`");
