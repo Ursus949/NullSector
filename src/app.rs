@@ -342,8 +342,8 @@ impl eframe::App for BootCon {
             });
             ui.separator();
             ui.collapsing("Disclaimer:", |ui| {
-                ui.label("\t- Nmap is currently hardcoded to run with \"-sC\", \"-sV\", and \"-v\" untill I can get the checkboxes to function correctly");
-                ui.label("\t- If running on Windows `NMAP`, `DIG`, and `WHOIS` will make the program crash unless you have those programs installed correctly");
+                ui.label("\t- Nmap is currently hardcoded to run with \"-sC\", \"-sV\", and \"-v\" until the checkboxes are wired up to control the flags");
+                ui.label("\t- On Windows, `NMAP`, `DIG`, and `WHOIS` need to be installed and on PATH. If they are missing, the button logs a warning instead of running the tool");
                 ui.label("\t\t- You can use Chocolatey on Windows to install DIG and WHOIS");
                 ui.label("\t\t- DIG -- `choco install bind-toolsonly`");
                 ui.label("\t\t- WHOIS -- `choco install whois`");
