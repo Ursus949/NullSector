@@ -1,7 +1,34 @@
 use std::process::Command;
-use std::process::Output;
-use whoami;
+
 use local_ip_address::local_ip;
+
+/// Runs a command in the background and reports failures instead of panicking.
+///
+/// A failure here means the OS could not start the process (for example, the
+/// binary is missing). We show a warning in the log instead of crashing the
+/// whole application over an optional tool not being installed.
+fn spawn_or_warn(mut command: Command, what: &str) {
+    if let Err(err) = command.spawn() {
+        tracing::warn!("{what} failed to start: {err}");
+    }
+}
+
+/// Fetches the public IP address as reported by `ipinfo.io`.
+///
+/// Returns an error message instead of the address when the lookup fails, so
+/// the UI can show the reason instead of crashing.
+fn fetch_public_ip() -> Result<String, String> {
+    let output = Command::new("curl")
+        .arg("ipinfo.io/ip")
+        .output()
+        .map_err(|err| format!("could not run curl: {err}"))?;
+
+    if !output.status.success() {
+        return Err(format!("curl exited with status {}", output.status));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
@@ -13,7 +40,7 @@ pub struct BootCon {
     #[serde(skip)]
     weather: String,
     #[serde(skip)]
-    public_ip: Output,
+    public_ip: Result<String, String>,
 }
 
 impl Default for BootCon {
@@ -22,10 +49,7 @@ impl Default for BootCon {
             host: "example.com".to_string(),
             target: "127.0.0.1".to_string(),
             weather: "Kansas+City".to_string(),
-            public_ip: Command::new("curl")
-                                .arg("ipinfo.io/ip")
-                                .output()
-                                .expect("Public IP? command failed to start"),
+            public_ip: fetch_public_ip(),
         }
     }
 }
@@ -51,209 +75,174 @@ impl eframe::App for BootCon {
         eframe::set_value(storage, eframe::APP_KEY, self);
     }
 
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        egui::Panel::top("top_panel").show(ui, |ui| {
             // The top panel for a menu bar:
-            egui::menu::bar(ui, |ui| {
+            egui::menu::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("Clear the Terminal").clicked() {
-
                         if cfg!(target_os = "windows") {
-                            Command::new("powershell")
-                                    .arg("-c")
-                                    .arg("clear")
-                                    .spawn()
-                                    .expect("Clear Term cmd failed to start");
+                            let mut cmd = Command::new("powershell");
+                            cmd.arg("-c").arg("clear");
+                            spawn_or_warn(cmd, "Clear Term (powershell)");
                         } else {
-                            Command::new("clear")
-                                    .spawn()
-                                    .expect("Clear Term 'else' cmd failed to start");
+                            spawn_or_warn(Command::new("clear"), "Clear Term");
                         }
                     }
                     if ui.button("Exit").clicked() {
-                        frame.close();
+                        ui.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
 
-                egui::widgets::global_dark_light_mode_switch(ui);
+                egui::widgets::global_theme_preference_switch(ui);
             });
         });
 
-        egui::SidePanel::left("side_panel").show(ctx, |ui| {
+        egui::Panel::left("side_panel").show(ui, |ui| {
             ui.heading("Common Commands");
 
             if ui.button("Hook into Term").clicked() {
                 if cfg!(target_os = "windows") {
-                    Command::new("powershell.exe")
-                            .spawn()
-                            .expect("PowerShell command failed to start");
+                    spawn_or_warn(Command::new("powershell.exe"), "PowerShell");
                 } else {
-                    Command::new("zsh")
-                            .spawn()
-                            .expect("Terminal command failed to start");
+                    spawn_or_warn(Command::new("zsh"), "Terminal (zsh)");
                 }
             }
 
             if ui.button("Local Network Config").clicked() {
                 if cfg!(target_os = "windows") {
-                    Command::new("ipconfig")
-                            .arg("/all")
-                            .spawn()
-                            .expect("Windows ipconfig command failed to start");
+                    let mut cmd = Command::new("ipconfig");
+                    cmd.arg("/all");
+                    spawn_or_warn(cmd, "Windows ipconfig");
                 } else if cfg!(target_os = "macos") {
-                    Command::new("ifconfig")
-                            .spawn()
-                            .expect("Mac's ifconfig command failed to start");
+                    spawn_or_warn(Command::new("ifconfig"), "macOS ifconfig");
                 } else {
-                    Command::new("ip")
-                            .arg("addr")
-                            .arg("show")
-                            .spawn()
-                            .expect("Linux's `ip addr show` command failed to start");
+                    let mut cmd = Command::new("ip");
+                    cmd.args(["addr", "show"]);
+                    spawn_or_warn(cmd, "Linux `ip addr show`");
                 }
             }
 
             ui.separator();
             ui.collapsing("NMAP", |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Target: ");
-                ui.text_edit_singleline(&mut self.target);
-            });
+                ui.horizontal(|ui| {
+                    ui.label("Target: ");
+                    ui.text_edit_singleline(&mut self.target);
+                });
 
-            if ui.button("Send it!").clicked() {
-                if cfg!(target_os = "windows") {
-                    Command::new("nmap")
-                            .args(["-sC", "-sV", "-v", &self.target, "-oA", &self.target])
-                            .spawn()
-                            .expect("NMAP WINDOWS(Hardcoded) command Failed to start.");
+                if ui.button("Send it!").clicked() {
+                    if cfg!(target_os = "windows") {
+                        let mut cmd = Command::new("nmap");
+                        cmd.args(["-sC", "-sV", "-v", &self.target, "-oA", &self.target]);
+                        spawn_or_warn(cmd, "NMAP (Windows, hardcoded)");
+                    } else {
+                        let mut cmd = Command::new("sudo");
+                        cmd.args(["nmap", "-sC", "-sV", "-v", &self.target, "-oA", &self.target]);
+                        spawn_or_warn(cmd, "NMAP (hardcoded)");
+                    }
                 }
-                else {
-                    Command::new("sudo")
-                            .args(["nmap", "-sC", "-sV", "-v", &self.target, "-oA", &self.target])
-                            .spawn()
-                            .expect("NMAP(Hardcoded) command Failed to start");
-                }
-            }
-});
+            });
             ui.separator();
             ui.collapsing("Network Tools", |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Target: ");
-                ui.text_edit_singleline(&mut self.host);
+                ui.horizontal(|ui| {
+                    ui.label("Target: ");
+                    ui.text_edit_singleline(&mut self.host);
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("NSLOOKUP:");
+                    if ui.button("NS").clicked() {
+                        let mut cmd = Command::new("nslookup");
+                        cmd.args(["-type=NS", &self.host]);
+                        spawn_or_warn(cmd, "nslookup (NS)");
+                    }
+                    if ui.button("MX").clicked() {
+                        let mut cmd = Command::new("nslookup");
+                        cmd.args(["-type=MX", &self.host]);
+                        spawn_or_warn(cmd, "nslookup (MX)");
+                    }
+                    if ui.button("TXT").clicked() {
+                        let mut cmd = Command::new("nslookup");
+                        cmd.args(["-type=TXT", &self.host]);
+                        spawn_or_warn(cmd, "nslookup (TXT)");
+                    }
+                    if ui.button("ANY").clicked() {
+                        let mut cmd = Command::new("nslookup");
+                        cmd.args(["-type=any", &self.host]);
+                        spawn_or_warn(cmd, "nslookup (ANY)");
+                    }
+                });
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("DIG").clicked() {
+                        let mut cmd = Command::new("dig");
+                        cmd.arg(&self.host);
+                        spawn_or_warn(cmd, "DIG");
+                    }
+
+                    if ui.button("WHOIS").clicked() {
+                        let mut cmd = Command::new("whois");
+                        cmd.arg(&self.host);
+                        spawn_or_warn(cmd, "WHOIS");
+                    }
+
+                    if ui.button("PING").clicked() {
+                        if cfg!(target_os = "windows") {
+                            let mut cmd = Command::new("ping");
+                            cmd.arg(&self.host);
+                            spawn_or_warn(cmd, "PING (Windows)");
+                        } else {
+                            let mut cmd = Command::new("ping");
+                            cmd.args(["-c", "4", &self.host]);
+                            spawn_or_warn(cmd, "PING");
+                        }
+                    }
+                });
+                ui.separator();
             });
-
-            ui.horizontal(|ui| {
-                ui.label("NSLOOKUP:");
-            if ui.button("NS").clicked() {
-                    Command::new("nslookup")
-                            .args(["-type=NS",&self.host])
-                            .spawn()
-                            .expect("nslookup (NS) command Failed to start.");
-            }
-            if ui.button("MX").clicked() {
-                    Command::new("nslookup")
-                            .args(["-type=MX",&self.host])
-                            .spawn()
-                            .expect("nslookup (MX) command Failed to start.");
-            }
-            if ui.button("TXT").clicked() {
-                    Command::new("nslookup")
-                            .args(["-type=TXT",&self.host])
-                            .spawn()
-                            .expect("nslookup (txt) command Failed to start.");
-            }
-            if ui.button("ANY").clicked() {
-                    Command::new("nslookup")
-                            .args(["-type=any",&self.host])
-                            .spawn()
-                            .expect("nslookup (any) command Failed to start.");
-            }
-    });
-            ui.separator();
-            ui.horizontal(|ui| {
-                if ui.button("DIG").clicked() {
-                    if cfg!(target_os = "windows") {
-                        Command::new("dig")
-                                .arg(&self.host)
-                                .spawn()
-                                .expect("Dig Windows failed to start");
-                    } else {
-                        Command::new("dig")
-                                .arg(&self.host)
-                                .spawn()
-                                .expect("DIG command failed to start");
-                    }
-                }
-
-                if ui.button("WHOIS").clicked() {
-                    if cfg!(target_os = "windows") {
-                        Command::new("whois")
-                                .arg(&self.host)
-                                .spawn()
-                                .expect("whois Windows failed to start");
-                    } else {
-                        Command::new("whois")
-                                .arg(&self.host)
-                                .spawn()
-                                .expect("WHOIS command failed to start");
-                    }
-                }
-
-                if ui.button("PING").clicked() {
-                    if cfg!(target_os = "windows") {
-                        Command::new("ping")
-                                .arg(&self.host)
-                                .spawn()
-                                .expect("PING (windows) command failed to start");
-                    } else {
-                        Command::new("ping")
-                                .args(["-c", "4", &self.host])
-                                .spawn()
-                                .expect("PING command failed to start");
-                    }
-                }
-            });
-            ui.separator();
-});
 
             ui.separator();
             ui.collapsing("Weather", |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Closest Major City: ");
-                ui.text_edit_singleline(&mut self.weather);
-            });
+                ui.horizontal(|ui| {
+                    ui.label("Closest Major City: ");
+                    ui.text_edit_singleline(&mut self.weather);
+                });
 
-            if ui.button("Current Weather").clicked() {
-                Command::new("curl")
-                        .arg("-s")
-                        .arg("http://wttr.in/".to_owned()+&self.weather+"?format=3")
-                        .spawn()
-                        .expect("Weather (current) command failed to start");
-            }
-            if ui.button("3-Day Forcast").clicked() {
-                Command::new("curl")
-                        .arg("-s")
-                        .arg("http://wttr.in/".to_owned()+&self.weather)
-                        .spawn()
-                        .expect("Weather (3-day) command failed to start");
-            }
-            ui.separator();
-});
+                if ui.button("Current Weather").clicked() {
+                    let mut cmd = Command::new("curl");
+                    cmd.arg("-s")
+                        .arg(format!("http://wttr.in/{}?format=3", self.weather));
+                    spawn_or_warn(cmd, "Weather (current)");
+                }
+                if ui.button("3-Day Forcast").clicked() {
+                    let mut cmd = Command::new("curl");
+                    cmd.arg("-s")
+                        .arg(format!("http://wttr.in/{}", self.weather));
+                    spawn_or_warn(cmd, "Weather (3-day)");
+                }
+                ui.separator();
+            });
             ui.separator();
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     ui.label("powered by ");
-                    ui.hyperlink_to("Curiosity", "https://www.merriam-webster.com/dictionary/curiosity");
+                    ui.hyperlink_to(
+                        "Curiosity",
+                        "https://www.merriam-webster.com/dictionary/curiosity",
+                    );
                     ui.label(" and ");
-                    ui.hyperlink_to("Insomnia", "https://www.mayoclinic.org/diseases-conditions/insomnia/symptoms-causes/syc-20355167");
+                    ui.hyperlink_to(
+                        "Insomnia",
+                        "https://www.mayoclinic.org/diseases-conditions/insomnia/symptoms-causes/syc-20355167",
+                    );
                 });
             });
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // The central panel the region left after adding TopPanel's and SidePanel's
+        egui::CentralPanel::default().show(ui, |ui| {
+            // The central panel is the region left after adding TopPanel's and SidePanel's.
             ui.heading("KU Cybersecurity 2022");
             ui.hyperlink_to("BootCampSpot", "https://bootcampspot.com/login");
             ui.hyperlink_to("KU GitLab", "https://ku.bootcampcontent.com/");
@@ -262,64 +251,94 @@ impl eframe::App for BootCon {
             ui.separator();
 
             ui.collapsing("PEAS Download:", |ui| {
-            ui.label("    - This button will allow you to download the PEAS, no matter what OS you are using (winPEAS, linPEAS)
+                ui.label(
+                    "    - This button will allow you to download the PEAS, no matter what OS you are using (winPEAS, linPEAS)
 
         - PEAS = Privilege Escalation Awesome Script
 
         - PEAS searches for possible paths to escalate privileges
 
-    - Will download the file to your $HOME DIR or the same DIR the app was ran from.");
-            ui.hyperlink_to("Hack Tricks","https://book.hacktricks.xyz/");
-            ui.horizontal(|ui| {
-                if ui.button("Download PEAs").clicked() {
-                    if cfg!(target_os = "windows") {
-                        Command::new("curl")
-                                .arg("-L")
-                                .arg("-O")
-                                .arg("https://github.com/carlospolop/PEASS-ng/releases/latest/download/winPEAS.bat")
-                                .spawn()
-                                .expect("WinPEAS command failed to start");
-                    } else {
-                        Command::new("curl")
-                                .arg("-L")
-                                .arg("-O")
-                                .arg("https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh")
-                                .spawn()
-                                .expect("LinPEAS command failed to start");
+    - Will download the file to your $HOME DIR or the same DIR the app was ran from.",
+                );
+                ui.hyperlink_to("Hack Tricks", "https://book.hacktricks.xyz/");
+                ui.horizontal(|ui| {
+                    if ui.button("Download PEAs").clicked() {
+                        if cfg!(target_os = "windows") {
+                            let mut cmd = Command::new("curl");
+                            cmd.arg("-L").arg("-O").arg(
+                                "https://github.com/carlospolop/PEASS-ng/releases/latest/download/winPEAS.bat",
+                            );
+                            spawn_or_warn(cmd, "WinPEAS download");
+                        } else {
+                            let mut cmd = Command::new("curl");
+                            cmd.arg("-L").arg("-O").arg(
+                                "https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh",
+                            );
+                            spawn_or_warn(cmd, "LinPEAS download");
+                        }
                     }
-                }
-                if ui.button("Run PEAs").clicked() {
-                    if cfg!(target_os = "windows") {
-                        Command::new("powershell.exe")
-                                .arg("-c")
-                                .arg(".\\winPEAS.bat")
-                                .spawn()
-                                .expect("RUN WinPEAS.bat command failed to start");
-                    } else {
-                        Command::new("sh")
-                                .arg("./linpeas.sh")
-                                .spawn()
-                                .expect("RUN LinPEAS.sh command failed to start");
+                    if ui.button("Run PEAs").clicked() {
+                        if cfg!(target_os = "windows") {
+                            let mut cmd = Command::new("powershell.exe");
+                            cmd.arg("-c").arg(".\\winPEAS.bat");
+                            spawn_or_warn(cmd, "Run WinPEAS.bat");
+                        } else {
+                            let mut cmd = Command::new("sh");
+                            cmd.arg("./linpeas.sh");
+                            spawn_or_warn(cmd, "Run LinPEAS.sh");
+                        }
                     }
-                }
+                });
             });
-});
             ui.separator();
             ui.collapsing("Host Info", |ui| {
-                ui.label(format!("Public IP: {}", String::from_utf8_lossy(&self.public_ip.stdout)));
-                let local_ip = local_ip().unwrap();
-                ui.label(format!("Local IP: {}", local_ip));
+                match &self.public_ip {
+                    Ok(ip) => ui.label(format!("Public IP: {ip}")),
+                    Err(err) => ui.colored_label(egui::Color32::RED, format!("Public IP: unavailable ({err})")),
+                };
+                match local_ip() {
+                    Ok(local_ip) => {
+                        ui.label(format!("Local IP: {local_ip}"));
+                    }
+                    Err(err) => {
+                        ui.colored_label(
+                            egui::Color32::RED,
+                            format!("Local IP: unavailable ({err})"),
+                        );
+                    }
+                }
                 ui.label(format!("Device Platform: {}", whoami::platform()));
-                ui.label(format!("OS Distro: {}", whoami::distro()));
-                ui.label(format!("Device's 'Pretty' Name: {}", whoami::devicename()));
-                ui.label(format!("Hostname: {}", whoami::hostname()));
-                ui.label(format!("Desktop Env: {}", whoami::desktop_env()));
+                match whoami::distro() {
+                    Ok(distro) => ui.label(format!("OS Distro: {distro}")),
+                    Err(err) => ui.colored_label(egui::Color32::RED, format!("OS Distro: unavailable ({err})")),
+                };
+                match whoami::devicename() {
+                    Ok(name) => ui.label(format!("Device's 'Pretty' Name: {name}")),
+                    Err(err) => ui.colored_label(egui::Color32::RED, format!("Device name: unavailable ({err})")),
+                };
+                match whoami::hostname() {
+                    Ok(hostname) => ui.label(format!("Hostname: {hostname}")),
+                    Err(err) => ui.colored_label(egui::Color32::RED, format!("Hostname: unavailable ({err})")),
+                };
+                match whoami::desktop_env() {
+                    Some(desktop_env) => ui.label(format!("Desktop Env: {desktop_env}")),
+                    None => ui.label("Desktop Env: unknown"),
+                };
 
                 ui.separator();
                 ui.heading("User Info:");
-                ui.label(format!("User's Name: {}", whoami::realname()));
-                ui.label(format!("User's Username: {}", whoami::username()));
-                ui.label(format!("User's Language: {:?}", whoami::lang().collect::<Vec<String>>()));
+                match whoami::realname() {
+                    Ok(name) => ui.label(format!("User's Name: {name}")),
+                    Err(err) => ui.colored_label(egui::Color32::RED, format!("User's Name: unavailable ({err})")),
+                };
+                match whoami::username() {
+                    Ok(name) => ui.label(format!("User's Username: {name}")),
+                    Err(err) => ui.colored_label(egui::Color32::RED, format!("User's Username: unavailable ({err})")),
+                };
+                match whoami::lang_prefs() {
+                    Ok(prefs) => ui.label(format!("User's Language: {prefs}")),
+                    Err(err) => ui.colored_label(egui::Color32::RED, format!("User's Language: unavailable ({err})")),
+                };
             });
             ui.separator();
             ui.collapsing("Disclaimer:", |ui| {
@@ -337,14 +356,5 @@ impl eframe::App for BootCon {
                 });
             });
         });
-
-        if false {
-            egui::Window::new("Window").show(ctx, |ui| {
-                ui.label("Windows can be moved by dragging them.");
-                ui.label("They are automatically sized based on contents.");
-                ui.label("You can turn on resizing and scrolling if you like.");
-                ui.label("You would normally chose either panels OR windows.");
-            });
-        }
     }
 }
