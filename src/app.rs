@@ -4,9 +4,9 @@ use local_ip_address::local_ip;
 
 /// Runs a command in the background and reports failures instead of panicking.
 ///
-/// A failure here means the OS could not start the process (for example, the
-/// binary is missing). We show a warning in the log instead of crashing the
-/// whole application over an optional tool not being installed.
+/// A failure here means the OS could not start the process. A common cause
+/// is a missing binary. The function logs a warning instead of crashing the
+/// application over an optional tool that is not installed.
 fn spawn_or_warn(mut command: Command, what: &str) {
     if let Err(err) = command.spawn() {
         tracing::warn!("{what} failed to start: {err}");
@@ -15,9 +15,9 @@ fn spawn_or_warn(mut command: Command, what: &str) {
 
 /// Quotes a single argument for POSIX shells by wrapping it in single quotes.
 ///
-/// This is what keeps user-supplied text (a hostname, a target, a port
-/// list) from being interpreted as shell syntax when it is spliced into a
-/// command line string for a terminal emulator to run.
+/// A terminal emulator runs this text as one command line. Quoting stops
+/// user-supplied text, such as a hostname or a port list, from acting as
+/// shell syntax.
 fn posix_quote(arg: &str) -> String {
     format!("'{}'", arg.replace('\'', r"'\''"))
 }
@@ -35,9 +35,10 @@ fn posix_command_line(program: &str, args: &[&str]) -> String {
 
 /// Terminal emulators to try, in order.
 ///
-/// Unlike Windows, Linux has no single terminal every install ships with, so
-/// we probe a list of common ones. `$TERMINAL` (a convention several window
-/// managers and desktop environments set) is tried first.
+/// Linux has no single terminal emulator that every install ships with.
+/// [`spawn_linux_terminal`] probes this list of common ones. It tries
+/// `$TERMINAL` first. Several window managers and desktop environments set
+/// this variable.
 const LINUX_TERMINALS: &[&str] = &[
     "alacritty",
     "kitty",
@@ -55,9 +56,9 @@ const LINUX_TERMINALS: &[&str] = &[
 /// Tries to launch `terminal` running the given `sh -c`-style command line.
 ///
 /// Most terminal emulators accept `-e <command>` to run a command instead of
-/// their default shell, but `gnome-terminal` deprecated `-e` in favor of
-/// `--`, and `wezterm` has no `-e` at all and instead uses its `start --`
-/// subcommand. Returns `true` if the process was spawned successfully.
+/// their default shell. `gnome-terminal` deprecated `-e` in favor of `--`.
+/// `wezterm` has no `-e` flag and uses its `start --` subcommand instead.
+/// Returns `true` when the process starts.
 fn try_spawn_terminal(terminal: &str, sh_command_line: &str) -> bool {
     let mut cmd = Command::new(terminal);
     match terminal {
@@ -76,9 +77,8 @@ fn try_spawn_terminal(terminal: &str, sh_command_line: &str) -> bool {
 
 /// Opens a terminal emulator on Linux running `sh_command_line`.
 ///
-/// Tries `$TERMINAL` first (a convention several window managers and
-/// desktop environments set), then falls back through [`LINUX_TERMINALS`].
-/// Logs a warning instead of doing nothing if none of them are installed.
+/// Tries `$TERMINAL` first, then falls back through [`LINUX_TERMINALS`].
+/// Logs a warning when no terminal emulator on the list is installed.
 fn spawn_linux_terminal(sh_command_line: &str) {
     let term = std::env::var("TERMINAL").unwrap_or_default();
     if !term.is_empty() {
@@ -102,13 +102,12 @@ fn spawn_linux_terminal(sh_command_line: &str) {
 
 /// Opens a new terminal window running an interactive shell.
 ///
-/// On Windows this launches PowerShell directly, since Windows gives console
-/// apps their own window automatically: a console-subsystem process spawned
-/// by a GUI-subsystem process gets its own console window for free. On
-/// Linux and macOS there is no such mechanism: a shell run directly from a
-/// GUI has no terminal attached and is invisible to the user, so a terminal
-/// *emulator* has to be launched instead, with the shell passed to it as
-/// the command to run.
+/// On Windows this launches PowerShell directly. Windows gives a
+/// console-subsystem process its own window automatically, even when a
+/// GUI-subsystem process starts it. Linux and macOS have no such mechanism.
+/// A shell started directly from a GUI app has no terminal attached, so the
+/// user cannot see it. This function launches a terminal emulator instead,
+/// and passes the shell to it as the command to run.
 fn spawn_terminal() {
     if cfg!(target_os = "windows") {
         spawn_or_warn(Command::new("powershell.exe"), "PowerShell");
@@ -126,20 +125,20 @@ fn spawn_terminal() {
     spawn_linux_terminal(&posix_quote(&shell));
 }
 
-/// Runs `program args...` inside a visible terminal so its output can
-/// actually be seen, then reports the failure to start it, if any.
+/// Runs `program args...` inside a visible terminal, and reports a failure
+/// to start it.
 ///
-/// `Command::spawn` inherits this GUI app's own stdout/stderr, which is not
-/// attached to any terminal the user is watching, so a command spawned
-/// directly produces output that goes nowhere visible. This wraps the
-/// command in a terminal emulator (or PowerShell/Terminal.app) the same way
-/// [`spawn_terminal`] does, instead of running it headless.
+/// `Command::spawn` inherits this GUI app's own stdout and stderr. No
+/// terminal shows those streams to the user, so a command started directly
+/// produces output nobody can see. This function wraps the command in a
+/// terminal emulator, or in PowerShell or Terminal.app, the same way
+/// [`spawn_terminal`] does, instead of running the command headless.
 fn run_visibly(program: &str, args: &[&str]) {
     if cfg!(target_os = "windows") {
-        // PowerShell's own argument quoting is handled by `Command`, so the
-        // program and its arguments can be passed through directly instead
-        // of being assembled into one string. `-NoExit` keeps the window
-        // open after the command finishes so the output can be read.
+        // `Command` already quotes arguments for PowerShell, so this code
+        // passes the program and its arguments through directly, instead of
+        // building one command-line string. `-NoExit` keeps the window open
+        // after the command finishes so the user can read the output.
         let mut cmd = Command::new("powershell.exe");
         cmd.arg("-NoExit").arg("-Command").arg(program).args(args);
         spawn_or_warn(cmd, program);
@@ -148,7 +147,7 @@ fn run_visibly(program: &str, args: &[&str]) {
 
     if cfg!(target_os = "macos") {
         // AppleScript is the standard way to ask Terminal.app to run a
-        // command in a fresh window; see
+        // command in a fresh window. See
         // https://apple.stackexchange.com/questions/205143.
         let command_line = posix_command_line(program, args);
         let script = format!(
@@ -172,8 +171,8 @@ fn run_visibly(program: &str, args: &[&str]) {
 
 /// Fetches the public IP address as reported by `ipinfo.io`.
 ///
-/// Returns an error message instead of the address when the lookup fails, so
-/// the UI can show the reason instead of crashing.
+/// Returns an error message instead of the address when the lookup fails.
+/// The UI shows this reason instead of crashing.
 fn fetch_public_ip() -> Result<String, String> {
     let output = Command::new("curl")
         .arg("ipinfo.io/ip")
@@ -335,11 +334,10 @@ impl eframe::App for BootCon {
                     if cfg!(target_os = "windows") {
                         run_visibly("nmap", &nmap_args);
                     } else {
-                        // nmap needs root for the scan types this app enables by
-                        // default (`-sC`/`-sV`), so it is run through `sudo`.
-                        // Running it in a real terminal (via `run_visibly`) means
-                        // `sudo` can actually prompt for a password instead of
-                        // failing or hanging with no visible output.
+                        // The `-sC` and `-sV` scans this app enables by default need
+                        // root, so the app runs nmap through `sudo`. `run_visibly`
+                        // runs `sudo` in a real terminal, so `sudo` can prompt for a
+                        // password instead of failing with no visible output.
                         let mut sudo_args: Vec<&str> = vec!["nmap"];
                         sudo_args.extend(&nmap_args);
                         run_visibly("sudo", &sudo_args);
@@ -400,7 +398,7 @@ impl eframe::App for BootCon {
                     let url = format!("http://wttr.in/{}?format=3", self.weather);
                     run_visibly("curl", &["-s", &url]);
                 }
-                if ui.button("3-Day Forcast").clicked() {
+                if ui.button("3-Day Forecast").clicked() {
                     let url = format!("http://wttr.in/{}", self.weather);
                     run_visibly("curl", &["-s", &url]);
                 }
@@ -434,17 +432,17 @@ impl eframe::App for BootCon {
 
             ui.collapsing("PEAS Download:", |ui| {
                 ui.label(
-                    "    - This button will allow you to download the PEAS, no matter what OS you are using (winPEAS, linPEAS)
+                    "    - This button downloads PEAS for the current OS (winPEAS on Windows, linPEAS otherwise)
 
         - PEAS = Privilege Escalation Awesome Script
 
         - PEAS searches for possible paths to escalate privileges
 
-    - Will download the file to your $HOME DIR or the same DIR the app was ran from.",
+    - The download goes to the $HOME directory, or the directory that started the app.",
                 );
                 ui.hyperlink_to("Hack Tricks", "https://book.hacktricks.xyz/");
                 ui.horizontal(|ui| {
-                    if ui.button("Download PEAs").clicked() {
+                    if ui.button("Download PEAS").clicked() {
                         if cfg!(target_os = "windows") {
                             let mut cmd = Command::new("curl");
                             cmd.arg("-L").arg("-O").arg(
@@ -459,7 +457,7 @@ impl eframe::App for BootCon {
                             spawn_or_warn(cmd, "LinPEAS download");
                         }
                     }
-                    if ui.button("Run PEAs").clicked() {
+                    if ui.button("Run PEAS").clicked() {
                         if cfg!(target_os = "windows") {
                             run_visibly(".\\winPEAS.bat", &[]);
                         } else {
@@ -497,11 +495,10 @@ impl eframe::App for BootCon {
                     Err(err) => {
                         let io_err: std::io::Error = err.into();
                         if io_err.kind() == std::io::ErrorKind::NotFound {
-                            // Most Linux systems never set a pretty device
-                            // name (it lives in `/etc/machine-info`, which
-                            // is optional), so a missing-file error here
-                            // just means nobody configured one, not a
-                            // failure.
+                            // Most Linux systems never set a pretty device name.
+                            // It lives in the optional file `/etc/machine-info`.
+                            // A missing-file error here means nobody configured
+                            // a name. It is not a failure.
                             ui.weak("Device's 'Pretty' Name: not set on this system");
                         } else {
                             ui.colored_label(
