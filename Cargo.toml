@@ -1,12 +1,12 @@
 [package]
-name = "ns_bootcon_gui"
-default-run = "ns_bootcon_gui"
+name = "ns-bootcon-gui"
+default-run = "ns-bootcon-gui"
 version = "0.1.0"
 authors = ["Ursus949"]
-edition = "2021"
+edition = "2024"
 
 [[bin]]
-name = "ns_bootcon_gui"
+name = "ns-bootcon-gui"
 path = "src/main.rs"
 
 [lib]

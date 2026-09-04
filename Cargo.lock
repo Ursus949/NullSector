@@ -2040,7 +2040,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ns_bootcon_gui"
+name = "ns-bootcon-gui"
 version = "0.1.0"
 dependencies = [
  "eframe",

@@ -13,6 +13,163 @@ fn spawn_or_warn(mut command: Command, what: &str) {
     }
 }
 
+/// Quotes a single argument for POSIX shells by wrapping it in single quotes.
+///
+/// This is what keeps user-supplied text (a hostname, a target, a port
+/// list) from being interpreted as shell syntax when it is spliced into a
+/// command line string for a terminal emulator to run.
+fn posix_quote(arg: &str) -> String {
+    format!("'{}'", arg.replace('\'', r"'\''"))
+}
+
+/// Builds a `sh`-compatible command line from a program and its arguments,
+/// with every part safely quoted.
+fn posix_command_line(program: &str, args: &[&str]) -> String {
+    let mut line = posix_quote(program);
+    for arg in args {
+        line.push(' ');
+        line.push_str(&posix_quote(arg));
+    }
+    line
+}
+
+/// Terminal emulators to try, in order.
+///
+/// Unlike Windows, Linux has no single terminal every install ships with, so
+/// we probe a list of common ones. `$TERMINAL` (a convention several window
+/// managers and desktop environments set) is tried first.
+const LINUX_TERMINALS: &[&str] = &[
+    "alacritty",
+    "kitty",
+    "wezterm",
+    "konsole",
+    "gnome-terminal",
+    "xfce4-terminal",
+    "tilix",
+    "terminator",
+    "foot",
+    "xterm",
+    "urxvt",
+];
+
+/// Tries to launch `terminal` running the given `sh -c`-style command line.
+///
+/// Most terminal emulators accept `-e <command>` to run a command instead of
+/// their default shell, but `gnome-terminal` deprecated `-e` in favor of
+/// `--`, and `wezterm` has no `-e` at all and instead uses its `start --`
+/// subcommand. Returns `true` if the process was spawned successfully.
+fn try_spawn_terminal(terminal: &str, sh_command_line: &str) -> bool {
+    let mut cmd = Command::new(terminal);
+    match terminal {
+        "gnome-terminal" => {
+            cmd.args(["--", "sh", "-c", sh_command_line]);
+        }
+        "wezterm" => {
+            cmd.args(["start", "--", "sh", "-c", sh_command_line]);
+        }
+        _ => {
+            cmd.args(["-e", "sh", "-c", sh_command_line]);
+        }
+    }
+    cmd.spawn().is_ok()
+}
+
+/// Opens a terminal emulator on Linux running `sh_command_line`.
+///
+/// Tries `$TERMINAL` first (a convention several window managers and
+/// desktop environments set), then falls back through [`LINUX_TERMINALS`].
+/// Logs a warning instead of doing nothing if none of them are installed.
+fn spawn_linux_terminal(sh_command_line: &str) {
+    let term = std::env::var("TERMINAL").unwrap_or_default();
+    if !term.is_empty() {
+        if try_spawn_terminal(&term, sh_command_line) {
+            return;
+        }
+        tracing::warn!("$TERMINAL ({term}) failed to start, trying known terminals");
+    }
+
+    for terminal in LINUX_TERMINALS {
+        if try_spawn_terminal(terminal, sh_command_line) {
+            return;
+        }
+    }
+
+    tracing::warn!(
+        "no terminal emulator found (tried $TERMINAL and {} known terminals)",
+        LINUX_TERMINALS.len()
+    );
+}
+
+/// Opens a new terminal window running an interactive shell.
+///
+/// On Windows this launches PowerShell directly, since Windows gives console
+/// apps their own window automatically: a console-subsystem process spawned
+/// by a GUI-subsystem process gets its own console window for free. On
+/// Linux and macOS there is no such mechanism: a shell run directly from a
+/// GUI has no terminal attached and is invisible to the user, so a terminal
+/// *emulator* has to be launched instead, with the shell passed to it as
+/// the command to run.
+fn spawn_terminal() {
+    if cfg!(target_os = "windows") {
+        spawn_or_warn(Command::new("powershell.exe"), "PowerShell");
+        return;
+    }
+
+    if cfg!(target_os = "macos") {
+        let mut cmd = Command::new("open");
+        cmd.args(["-a", "Terminal"]);
+        spawn_or_warn(cmd, "Terminal.app");
+        return;
+    }
+
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
+    spawn_linux_terminal(&posix_quote(&shell));
+}
+
+/// Runs `program args...` inside a visible terminal so its output can
+/// actually be seen, then reports the failure to start it, if any.
+///
+/// `Command::spawn` inherits this GUI app's own stdout/stderr, which is not
+/// attached to any terminal the user is watching, so a command spawned
+/// directly produces output that goes nowhere visible. This wraps the
+/// command in a terminal emulator (or PowerShell/Terminal.app) the same way
+/// [`spawn_terminal`] does, instead of running it headless.
+fn run_visibly(program: &str, args: &[&str]) {
+    if cfg!(target_os = "windows") {
+        // PowerShell's own argument quoting is handled by `Command`, so the
+        // program and its arguments can be passed through directly instead
+        // of being assembled into one string. `-NoExit` keeps the window
+        // open after the command finishes so the output can be read.
+        let mut cmd = Command::new("powershell.exe");
+        cmd.arg("-NoExit").arg("-Command").arg(program).args(args);
+        spawn_or_warn(cmd, program);
+        return;
+    }
+
+    if cfg!(target_os = "macos") {
+        // AppleScript is the standard way to ask Terminal.app to run a
+        // command in a fresh window; see
+        // https://apple.stackexchange.com/questions/205143.
+        let command_line = posix_command_line(program, args);
+        let script = format!(
+            "tell application \"Terminal\" to do script \"{}\"",
+            command_line.replace('\\', "\\\\").replace('"', "\\\"")
+        );
+        let mut cmd = Command::new("osascript");
+        cmd.args(["-e", &script]);
+        spawn_or_warn(cmd, "Terminal.app");
+        return;
+    }
+
+    // Keep the terminal open after the command finishes so the output does
+    // not flash and disappear as soon as the command exits.
+    let command_line = format!(
+        "{}; printf '\\n[press Enter to close] '; read _",
+        posix_command_line(program, args)
+    );
+    spawn_linux_terminal(&command_line);
+}
+
 /// Fetches the public IP address as reported by `ipinfo.io`.
 ///
 /// Returns an error message instead of the address when the lookup fails, so
@@ -37,6 +194,9 @@ pub struct BootCon {
     nmap_default_scripts: bool,
     nmap_service_version: bool,
     nmap_verbose: bool,
+    nmap_use_custom_ports: bool,
+    nmap_ports: String,
+    nmap_save_output: bool,
 
     #[serde(skip)]
     host: String,
@@ -55,6 +215,9 @@ impl Default for BootCon {
             nmap_default_scripts: true,
             nmap_service_version: true,
             nmap_verbose: true,
+            nmap_use_custom_ports: false,
+            nmap_ports: String::new(),
+            nmap_save_output: true,
             public_ip: fetch_public_ip(),
         }
     }
@@ -108,24 +271,16 @@ impl eframe::App for BootCon {
             ui.heading("Common Commands");
 
             if ui.button("Hook into Term").clicked() {
-                if cfg!(target_os = "windows") {
-                    spawn_or_warn(Command::new("powershell.exe"), "PowerShell");
-                } else {
-                    spawn_or_warn(Command::new("zsh"), "Terminal (zsh)");
-                }
+                spawn_terminal();
             }
 
             if ui.button("Local Network Config").clicked() {
                 if cfg!(target_os = "windows") {
-                    let mut cmd = Command::new("ipconfig");
-                    cmd.arg("/all");
-                    spawn_or_warn(cmd, "Windows ipconfig");
+                    run_visibly("ipconfig", &["/all"]);
                 } else if cfg!(target_os = "macos") {
-                    spawn_or_warn(Command::new("ifconfig"), "macOS ifconfig");
+                    run_visibly("ifconfig", &[]);
                 } else {
-                    let mut cmd = Command::new("ip");
-                    cmd.args(["addr", "show"]);
-                    spawn_or_warn(cmd, "Linux `ip addr show`");
+                    run_visibly("ip", &["addr", "show"]);
                 }
             }
 
@@ -140,6 +295,17 @@ impl eframe::App for BootCon {
                 ui.checkbox(&mut self.nmap_service_version, "-sV (service/version detection)");
                 ui.checkbox(&mut self.nmap_verbose, "-v (verbose)");
 
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.nmap_use_custom_ports, "-p (ports)");
+                    ui.add_enabled(
+                        self.nmap_use_custom_ports,
+                        egui::TextEdit::singleline(&mut self.nmap_ports)
+                            .hint_text("e.g. 22,80,443 or 1-1000"),
+                    );
+                });
+
+                ui.checkbox(&mut self.nmap_save_output, "-oA (save output to files named after the target)");
+
                 if ui.button("Send it!").clicked() {
                     let mut flags: Vec<&str> = Vec::new();
                     if self.nmap_default_scripts {
@@ -151,18 +317,32 @@ impl eframe::App for BootCon {
                     if self.nmap_verbose {
                         flags.push("-v");
                     }
+                    if self.nmap_use_custom_ports && !self.nmap_ports.trim().is_empty() {
+                        flags.push("-p");
+                        flags.push(self.nmap_ports.trim());
+                    }
+
+                    let mut output_args: Vec<&str> = Vec::new();
+                    if self.nmap_save_output {
+                        output_args.push("-oA");
+                        output_args.push(&self.target);
+                    }
+
+                    let mut nmap_args: Vec<&str> = flags;
+                    nmap_args.push(&self.target);
+                    nmap_args.extend(&output_args);
 
                     if cfg!(target_os = "windows") {
-                        let mut cmd = Command::new("nmap");
-                        cmd.args(&flags)
-                            .args([&self.target, "-oA", &self.target]);
-                        spawn_or_warn(cmd, "NMAP (Windows)");
+                        run_visibly("nmap", &nmap_args);
                     } else {
-                        let mut cmd = Command::new("sudo");
-                        cmd.arg("nmap")
-                            .args(&flags)
-                            .args([&self.target, "-oA", &self.target]);
-                        spawn_or_warn(cmd, "NMAP");
+                        // nmap needs root for the scan types this app enables by
+                        // default (`-sC`/`-sV`), so it is run through `sudo`.
+                        // Running it in a real terminal (via `run_visibly`) means
+                        // `sudo` can actually prompt for a password instead of
+                        // failing or hanging with no visible output.
+                        let mut sudo_args: Vec<&str> = vec!["nmap"];
+                        sudo_args.extend(&nmap_args);
+                        run_visibly("sudo", &sudo_args);
                     }
                 }
             });
@@ -176,49 +356,33 @@ impl eframe::App for BootCon {
                 ui.horizontal(|ui| {
                     ui.label("NSLOOKUP:");
                     if ui.button("NS").clicked() {
-                        let mut cmd = Command::new("nslookup");
-                        cmd.args(["-type=NS", &self.host]);
-                        spawn_or_warn(cmd, "nslookup (NS)");
+                        run_visibly("nslookup", &["-type=NS", &self.host]);
                     }
                     if ui.button("MX").clicked() {
-                        let mut cmd = Command::new("nslookup");
-                        cmd.args(["-type=MX", &self.host]);
-                        spawn_or_warn(cmd, "nslookup (MX)");
+                        run_visibly("nslookup", &["-type=MX", &self.host]);
                     }
                     if ui.button("TXT").clicked() {
-                        let mut cmd = Command::new("nslookup");
-                        cmd.args(["-type=TXT", &self.host]);
-                        spawn_or_warn(cmd, "nslookup (TXT)");
+                        run_visibly("nslookup", &["-type=TXT", &self.host]);
                     }
                     if ui.button("ANY").clicked() {
-                        let mut cmd = Command::new("nslookup");
-                        cmd.args(["-type=any", &self.host]);
-                        spawn_or_warn(cmd, "nslookup (ANY)");
+                        run_visibly("nslookup", &["-type=any", &self.host]);
                     }
                 });
                 ui.separator();
                 ui.horizontal(|ui| {
                     if ui.button("DIG").clicked() {
-                        let mut cmd = Command::new("dig");
-                        cmd.arg(&self.host);
-                        spawn_or_warn(cmd, "DIG");
+                        run_visibly("dig", &[&self.host]);
                     }
 
                     if ui.button("WHOIS").clicked() {
-                        let mut cmd = Command::new("whois");
-                        cmd.arg(&self.host);
-                        spawn_or_warn(cmd, "WHOIS");
+                        run_visibly("whois", &[&self.host]);
                     }
 
                     if ui.button("PING").clicked() {
                         if cfg!(target_os = "windows") {
-                            let mut cmd = Command::new("ping");
-                            cmd.arg(&self.host);
-                            spawn_or_warn(cmd, "PING (Windows)");
+                            run_visibly("ping", &[&self.host]);
                         } else {
-                            let mut cmd = Command::new("ping");
-                            cmd.args(["-c", "4", &self.host]);
-                            spawn_or_warn(cmd, "PING");
+                            run_visibly("ping", &["-c", "4", &self.host]);
                         }
                     }
                 });
@@ -233,16 +397,12 @@ impl eframe::App for BootCon {
                 });
 
                 if ui.button("Current Weather").clicked() {
-                    let mut cmd = Command::new("curl");
-                    cmd.arg("-s")
-                        .arg(format!("http://wttr.in/{}?format=3", self.weather));
-                    spawn_or_warn(cmd, "Weather (current)");
+                    let url = format!("http://wttr.in/{}?format=3", self.weather);
+                    run_visibly("curl", &["-s", &url]);
                 }
                 if ui.button("3-Day Forcast").clicked() {
-                    let mut cmd = Command::new("curl");
-                    cmd.arg("-s")
-                        .arg(format!("http://wttr.in/{}", self.weather));
-                    spawn_or_warn(cmd, "Weather (3-day)");
+                    let url = format!("http://wttr.in/{}", self.weather);
+                    run_visibly("curl", &["-s", &url]);
                 }
                 ui.separator();
             });
@@ -268,8 +428,6 @@ impl eframe::App for BootCon {
         egui::CentralPanel::default().show(ui, |ui| {
             // The central panel is the region left after adding TopPanel's and SidePanel's.
             ui.heading("KU Cybersecurity 2022");
-            ui.hyperlink_to("BootCampSpot", "https://bootcampspot.com/login");
-            ui.hyperlink_to("KU GitLab", "https://ku.bootcampcontent.com/");
             egui::warn_if_debug_build(ui);
 
             ui.separator();
@@ -303,13 +461,9 @@ impl eframe::App for BootCon {
                     }
                     if ui.button("Run PEAs").clicked() {
                         if cfg!(target_os = "windows") {
-                            let mut cmd = Command::new("powershell.exe");
-                            cmd.arg("-c").arg(".\\winPEAS.bat");
-                            spawn_or_warn(cmd, "Run WinPEAS.bat");
+                            run_visibly(".\\winPEAS.bat", &[]);
                         } else {
-                            let mut cmd = Command::new("sh");
-                            cmd.arg("./linpeas.sh");
-                            spawn_or_warn(cmd, "Run LinPEAS.sh");
+                            run_visibly("sh", &["./linpeas.sh"]);
                         }
                     }
                 });
@@ -337,8 +491,25 @@ impl eframe::App for BootCon {
                     Err(err) => ui.colored_label(egui::Color32::RED, format!("OS Distro: unavailable ({err})")),
                 };
                 match whoami::devicename() {
-                    Ok(name) => ui.label(format!("Device's 'Pretty' Name: {name}")),
-                    Err(err) => ui.colored_label(egui::Color32::RED, format!("Device name: unavailable ({err})")),
+                    Ok(name) => {
+                        ui.label(format!("Device's 'Pretty' Name: {name}"));
+                    }
+                    Err(err) => {
+                        let io_err: std::io::Error = err.into();
+                        if io_err.kind() == std::io::ErrorKind::NotFound {
+                            // Most Linux systems never set a pretty device
+                            // name (it lives in `/etc/machine-info`, which
+                            // is optional), so a missing-file error here
+                            // just means nobody configured one, not a
+                            // failure.
+                            ui.weak("Device's 'Pretty' Name: not set on this system");
+                        } else {
+                            ui.colored_label(
+                                egui::Color32::RED,
+                                format!("Device name: unavailable ({io_err})"),
+                            );
+                        }
+                    }
                 };
                 match whoami::hostname() {
                     Ok(hostname) => ui.label(format!("Hostname: {hostname}")),
