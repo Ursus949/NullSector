@@ -1,6 +1,7 @@
 # NullSector
 
 [![CI](https://github.com/Ursus949/NullSector/actions/workflows/ci.yml/badge.svg)](https://github.com/Ursus949/NullSector/actions/workflows/ci.yml)
+[![Security audit](https://github.com/Ursus949/NullSector/actions/workflows/audit.yml/badge.svg)](https://github.com/Ursus949/NullSector/actions/workflows/audit.yml)
 
 NullSector is a desktop GUI for common networking and security tools. It
 wraps `nmap`, `dig`, `whois`, `nslookup`, `ping`, and a few others behind

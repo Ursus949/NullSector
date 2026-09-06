@@ -1,0 +1,58 @@
+name: Security audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".github/workflows/audit.yml"
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".github/workflows/audit.yml"
+  schedule:
+    # Run every Monday at 06:00 UTC. New advisories appear against code that
+    # does not change, so a scheduled run catches them.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo-audit
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}
+
+      - name: Install cargo-audit
+        run: |
+          if ! command -v cargo-audit > /dev/null; then
+            cargo install cargo-audit --locked
+          fi
+
+      # Ignored advisories:
+      #   RUSTSEC-2026-0192  ttf-parser is unmaintained. egui pulls it in
+      #                      through its font stack, so this project cannot
+      #                      remove it. Review when egui updates.
+      - name: Run cargo audit
+        run: cargo audit --deny warnings --ignore RUSTSEC-2026-0192

@@ -9,9 +9,14 @@ All notable changes to NullSector are documented here. This project uses
 ### Added
 
 - MIT license file. The README and the crate metadata name the license.
+- Security audit workflow. It runs `cargo audit` on dependency changes and
+  every Monday, so new advisories appear without a code change.
 
 ### Changed
 
+- Updated the dependency lockfile. This clears advisories in
+  `tracing-subscriber`, `bytes`, `bumpalo`, and `arrayref`, and removes the
+  unmaintained `ansi_term` crate.
 - Renamed the crate and the binary from `ns-bootcon-gui` to `nullsector`.
   The name now matches the project. Download links from earlier releases
   do not work with this version.
