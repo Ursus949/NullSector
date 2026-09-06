@@ -6,6 +6,10 @@ All notable changes to NullSector are documented here. This project uses
 
 ## [0.3.0] - 2026-09-05
 
+### Added
+
+- MIT license file. The README and the crate metadata name the license.
+
 ### Changed
 
 - Renamed the crate and the binary from `ns-bootcon-gui` to `nullsector`.

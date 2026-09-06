@@ -4,6 +4,9 @@ default-run = "nullsector"
 version = "0.3.0"
 authors = ["Ursus949"]
 edition = "2024"
+license = "MIT"
+description = "A desktop GUI for common networking and security tools."
+repository = "https://github.com/Ursus949/NullSector"
 
 [[bin]]
 name = "nullsector"

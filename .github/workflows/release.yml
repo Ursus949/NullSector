@@ -66,7 +66,7 @@ jobs:
           name="nullsector-${version}-${{ matrix.target }}"
           mkdir -p "dist/${name}"
           cp "target/${{ matrix.target }}/release/nullsector" "dist/${name}/"
-          cp README.md CHANGELOG.md "dist/${name}/"
+          cp README.md CHANGELOG.md LICENSE "dist/${name}/"
           cp -r docs "dist/${name}/docs"
           tar -C dist -czf "dist/${name}.tar.gz" "${name}"
           shasum -a 256 "dist/${name}.tar.gz" > "dist/${name}.tar.gz.sha256"
@@ -79,7 +79,7 @@ jobs:
           $name = "nullsector-$version-${{ matrix.target }}"
           New-Item -ItemType Directory -Force -Path "dist/$name" | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/nullsector.exe" "dist/$name/"
-          Copy-Item README.md,CHANGELOG.md "dist/$name/"
+          Copy-Item README.md,CHANGELOG.md,LICENSE "dist/$name/"
           Copy-Item -Recurse docs "dist/$name/docs"
           Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip"
           (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash | Out-File "dist/$name.zip.sha256"

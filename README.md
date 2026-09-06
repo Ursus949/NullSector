@@ -110,5 +110,5 @@ build.rs    embeds the Windows executable icon
 
 ## License
 
-This project has no license file yet. Contact the repository owner before
-you reuse this code.
+NullSector is released under the MIT License. See [`LICENSE`](LICENSE) for
+the full text.
