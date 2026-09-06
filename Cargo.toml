@@ -1,12 +1,12 @@
 [package]
-name = "ns-bootcon-gui"
-default-run = "ns-bootcon-gui"
-version = "0.2.0"
+name = "nullsector"
+default-run = "nullsector"
+version = "0.3.0"
 authors = ["Ursus949"]
 edition = "2024"
 
 [[bin]]
-name = "ns-bootcon-gui"
+name = "nullsector"
 path = "src/main.rs"
 
 [lib]

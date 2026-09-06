@@ -74,7 +74,7 @@ For a release build:
 cargo build --release
 ```
 
-The binary is at `target/release/ns-bootcon-gui`.
+The binary is at `target/release/nullsector`.
 
 ## Development
 

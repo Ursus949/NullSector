@@ -12,6 +12,6 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "NullSector BootCon",
         native_options,
-        Box::new(|cc| Ok(Box::new(ns_bootcon_gui::BootCon::new(cc)))),
+        Box::new(|cc| Ok(Box::new(nullsector::BootCon::new(cc)))),
     )
 }

@@ -2040,8 +2040,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "ns-bootcon-gui"
-version = "0.2.0"
+name = "nullsector"
+version = "0.3.0"
 dependencies = [
  "eframe",
  "egui",

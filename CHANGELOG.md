@@ -4,6 +4,14 @@ All notable changes to NullSector are documented here. This project uses
 [semantic versioning](https://semver.org/). While the version stays below
 `1.0.0`, minor releases may change behavior.
 
+## [0.3.0] - 2026-09-05
+
+### Changed
+
+- Renamed the crate and the binary from `ns-bootcon-gui` to `nullsector`.
+  The name now matches the project. Download links from earlier releases
+  do not work with this version.
+
 ## [0.2.0] - 2026-09-05
 
 ### Added

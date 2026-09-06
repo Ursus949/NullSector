@@ -63,9 +63,9 @@ jobs:
         shell: bash
         run: |
           version="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
-          name="ns-bootcon-gui-${version}-${{ matrix.target }}"
+          name="nullsector-${version}-${{ matrix.target }}"
           mkdir -p "dist/${name}"
-          cp "target/${{ matrix.target }}/release/ns-bootcon-gui" "dist/${name}/"
+          cp "target/${{ matrix.target }}/release/nullsector" "dist/${name}/"
           cp README.md CHANGELOG.md "dist/${name}/"
           cp -r docs "dist/${name}/docs"
           tar -C dist -czf "dist/${name}.tar.gz" "${name}"
@@ -76,9 +76,9 @@ jobs:
         shell: pwsh
         run: |
           $version = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "${{ github.event.inputs.tag }}" }
-          $name = "ns-bootcon-gui-$version-${{ matrix.target }}"
+          $name = "nullsector-$version-${{ matrix.target }}"
           New-Item -ItemType Directory -Force -Path "dist/$name" | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/ns-bootcon-gui.exe" "dist/$name/"
+          Copy-Item "target/${{ matrix.target }}/release/nullsector.exe" "dist/$name/"
           Copy-Item README.md,CHANGELOG.md "dist/$name/"
           Copy-Item -Recurse docs "dist/$name/docs"
           Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip"
