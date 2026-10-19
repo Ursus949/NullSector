@@ -1,0 +1,21 @@
+# cargo-audit configuration. Both the local `cargo audit` command and the
+# "Security audit" workflow read this file, so they report the same result.
+
+[advisories]
+# All of these advisories are "unmaintained" warnings for transitive
+# dependencies. This project cannot remove them. Review when eframe/egui
+# updates.
+ignore = [
+    # ttf-parser is unmaintained. egui pulls it in through its font stack.
+    "RUSTSEC-2026-0192",
+    # zvariant, zbus_names, and zvariant_derive are merged into zbus 6.
+    # eframe pulls in zbus 5 through accesskit_unix (Linux accessibility).
+    # accesskit_unix 0.24.0 still uses zbus 5.
+    "RUSTSEC-2026-0370", # zvariant
+    "RUSTSEC-2026-0371", # zbus_names
+    "RUSTSEC-2026-0372", # zvariant_derive
+]
+
+[output]
+deny = ["warnings"]
+quiet = false

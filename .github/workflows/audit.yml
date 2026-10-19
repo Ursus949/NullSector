@@ -7,11 +7,13 @@ on:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
       - ".github/workflows/audit.yml"
+      - ".cargo/audit.toml"
   pull_request:
     paths:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
       - ".github/workflows/audit.yml"
+      - ".cargo/audit.toml"
   schedule:
     # Run every Monday at 06:00 UTC. New advisories appear against code that
     # does not change, so a scheduled run catches them.
@@ -50,9 +52,7 @@ jobs:
             cargo install cargo-audit --locked
           fi
 
-      # Ignored advisories:
-      #   RUSTSEC-2026-0192  ttf-parser is unmaintained. egui pulls it in
-      #                      through its font stack, so this project cannot
-      #                      remove it. Review when egui updates.
+      # .cargo/audit.toml holds the ignored advisories and the
+      # "deny warnings" setting. Local runs use the same file.
       - name: Run cargo audit
-        run: cargo audit --deny warnings --ignore RUSTSEC-2026-0192
+        run: cargo audit
